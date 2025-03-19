@@ -17,6 +17,7 @@ COMPILER_VERSION=10.5.0
 USE_DEFAULT_COMPILER=OFF
 DEAL_II_VERSION=9.6.2
 DEAL_II_WITH_CUDA=OFF
+CUDA_ARCH=89
 
 while [ -n "$1" ]; do
   input="$1"
@@ -28,6 +29,7 @@ while [ -n "$1" ]; do
       echo "Usage: $0 [options]"
       echo "Options:"
       echo "  --cuda=<ON/OFF> whether to build deal.II with CUDA (default = ${DEAL_II_WITH_CUDA})"
+      echo "  --cuda_arch=<number> cuda architecture (default = ${CUDA_ARCH})"
       echo "  --default=<ON/OFF> override to use default spack compiler (default = ${USE_DEFAULT_COMPILER})"
       echo "  -c=<compiler@version>, --compiler=<compiler@version>  set a different compiler and version (default = ${COMPILER_TYPE}@${COMPILER_VERSION})"
       echo "  -v <version>, -v=<version>, --version=<version>  set a different deal.II version (default = ${DEAL_II_VERSION})"
@@ -41,6 +43,10 @@ while [ -n "$1" ]; do
         color_echo ${BAD} "Invalid value for --cuda: $DEAL_II_WITH_CUDA. Expected ON or OFF."
         exit 2
       fi
+    ;;
+
+    --cuda_arch=*)
+      CUDA_ARCH="${input#*=}"
     ;;
 
     --default=*)
@@ -140,12 +146,13 @@ install_compilers() {
 install_dealii() {
   COMPILER=${COMPILER_TYPE}
 
-  # TODO: Let the user specify which cuda arch
   # TODO: Let the user set what dealii packages to install in some config file
-  # Package list
-  packages=("caliper@2.12.1" "dealii@${DEAL_II_VERSION}~adol-c~arborx~arpack~assimp~ginkgo~gmsh~metis~muparser~opencascade~simplex~symengine")
+  # Package list for the dealii dependencies
+  packages=("cmake@3.31.6" "p4est@2.8" "sundials@7.2.1" "openblas@0.3.29" "caliper@2.12.1" "openmpi@5.0.6")
   if [ "$DEAL_II_WITH_CUDA" == "ON" ] ; then
-    packages=("caliper@2.12.1+cuda cuda_arch=89 ^cuda@11.8.0" "dealii@${DEAL_II_VERSION}~adol=c~arborx~arpack~assimp~ginkgo~gmsh~metis~muparser~opencascade~simplex~symengine+cuda cuda_arch=89 ^cuda@11.8.0")
+    color_echo ${BAD} "CUDA not implemented"
+    exit 1
+    packages+=("")
   fi
 
   # Install the required and optional dependencies for PRISMS-PF
@@ -177,9 +184,28 @@ install_dealii() {
   color_echo ${GOOD} "Required packages installed"
   spack gc -y
   
-  exit 1
-}
+  # Load the dependencies and compile deal.II
+  module purge
+  module load ${COMPILER}/${COMPILER_VERSION}
+  module load cmake/3.31.6-${COMPILER}-${COMPILER_VERSION}
+  module load p4est/2.8-${COMPILER}-${COMPILER_VERSION}
+  module load sundials/7.2.1-${COMPILER}-${COMPILER_VERSION}
+  module load openblas/0.3.29-${COMPILER}-${COMPILER_VERSION}
+  module load openmpi/5.0.6-${COMPILER}-${COMPILER_VERSION}
 
+  if [ ! -d "dealii" ]; then
+    git clone https://github.com/dealii/dealii.git
+    quit_if_fail "Failed to clone dealii"
+  fi
+
+  cd dealii
+  git checkout tags/v${DEAL_II_VERSION}
+  quit_if_fail "Invalid deal.II version number"
+  cd ..
+
+  
+
+}
 #############################################################
 # Check for various dependencies
 if ! [ -x "$(command -v git)" ]; then
