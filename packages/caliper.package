@@ -1,0 +1,5 @@
+VERSION=2.12.1
+
+install() {
+  color_echo ${INFO} "Installing Caliper version $VERSION"
+}

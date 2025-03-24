@@ -1,0 +1,5 @@
+VERSION=2.8
+
+install() {
+  color_echo ${INFO} "Installing p4est version $VERSION"
+}

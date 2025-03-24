@@ -1,0 +1,5 @@
+VERSION=7.2.1
+
+install() {
+  color_echo ${INFO} "Installing SUNDIALS version $VERSION"
+}

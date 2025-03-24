@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 #############################################################
+# Required packages
+PACKAGES="openblas openmpi p4est kokkos zlib"
+
+#############################################################
 # Grab the cfg file
 if [ -f "candi.cfg" ]; then
   source candi.cfg
@@ -19,9 +23,37 @@ fi
 TIC_GLOBAL="$(${DATE_CMD} +%s)"
 
 #############################################################
+# Various niceties that make the script look pretty
+
+# Colors
+BAD="\033[1;31m"
+GOOD="\033[1;32m"
+WARN="\033[1;35m"
+INFO="\033[1;34m"
+BOLD="\033[1m"
+
+# Color echo
+color_echo() {
+  COLOR=$1
+  shift
+  echo -e "${COLOR}$@\033[0m"
+}
+
+# Exit with some useful information
+quit_if_fail() {
+  STATUS=$?
+  if [ ${STATUS} -ne 0 ]; then
+    color_echo ${BAD} "Failure with exit status:" ${STATUS}
+    color_echo ${BAD} "Exit message:" $1
+    exit ${STATUS}
+  fi
+}
+
+#############################################################
 # Parse command line inputs
+PREFIX=~/prisms-pf-candi
 JOBS=1
-USE_DEFAULT_COMPILER=OFF
+USE_DEFAULT_COMPILER=ON
 
 while [ -n "$1" ]; do
   input="$1"
@@ -32,17 +64,22 @@ while [ -n "$1" ]; do
     echo ""
     echo "Usage: $0 [options]"
     echo "Options:"
+    echo "  -p <path>, --prefix=<path> set a different prefix path (default = $PREFIX)"
     echo "  --default=<ON/OFF> override to use default spack compiler (default = ${USE_DEFAULT_COMPILER})"
-    echo "  -j <N>, -j<N>, --jobs=<N>  compile with N processes in parallel (default = ${JOBS})"
+    echo "  -j <N>, -j<N>, --jobs=<N> compile with N processes in parallel (default = ${JOBS})"
     exit 0
+    ;;
+
+  -p)
+    shift
+    PREFIX="${1}"
+    ;;
+  -p=* | --prefix=*)
+    PREFIX="${param#*=}"
     ;;
 
   --default=*)
     USE_DEFAULT_COMPILER="${input#*=}"
-    if [[ "$USE_DEFAULT_COMPILER" != "ON" && "$USE_DEFAULT_COMPILER" != "OFF" ]]; then
-      color_echo ${BAD} "Invalid value for --default: $USE_DEFAULT_COMPILER. Expected ON or OFF."
-      exit 2
-    fi
     ;;
 
   --jobs=*)
@@ -65,34 +102,45 @@ while [ -n "$1" ]; do
   shift
 done
 
-#############################################################
-# Various niceties that make the script look pretty
+# Replace the ~ with the home directory
+PREFIX_PATH=${PREFIX/#~\//$HOME\/}
+unset PREFIX
 
-## Colors
-BAD="\033[1;31m"
-GOOD="\033[1;32m"
-WARN="\033[1;35m"
-INFO="\033[1;34m"
-BOLD="\033[1m"
+# Set other paths
+BUILD_PATH=${PREFIX_PATH}/tmp/build
+INSTALL_PATH=${PREFIX_PATH}
 
-## Color echo
-color_echo() {
-  COLOR=$1
-  shift
-  echo -e "${COLOR}$@\033[0m"
-}
-
-## Exit with some useful information
-quit_if_fail() {
-  STATUS=$?
-  if [ ${STATUS} -ne 0 ]; then
-    color_echo ${BAD} "Failure with exit status:" ${STATUS}
-    color_echo ${BAD} "Exit message:" $1
-    exit ${STATUS}
-  fi
-}
+# Check that inputs are valids
+if [[ "$USE_DEFAULT_COMPILER" != "ON" && "$USE_DEFAULT_COMPILER" != "OFF" ]]; then
+  color_echo ${BAD} "Invalid value for --default: $USE_DEFAULT_COMPILER. Expected ON or OFF."
+  exit 2
+fi
+if ! [[ "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
+  color_echo ${BAD} "Invalid value for --jobs: $JOBS. Expected a positive number."
+  exit 2
+fi
 
 #############################################################
+# Check for various dependencies
+if ! [ -x "$(command -v git)" ]; then
+  color_echo ${BAD} "Make sure git is installed and in path."
+  exit 1
+fi
+if ! command -v spack >/dev/null 2>&1 && [ $USE_SPACK == "ON" ]; then
+  color_echo ${BAD} "Make sure spack is installed and in path."
+  exit 1
+fi
+if ! command -v module >/dev/null 2>&1 && [ $USE_SPACK == "ON" ]; then
+  color_echo ${BAD} "Make sure spack's module system has been setup and in path."
+  exit 1
+fi
+if ! command -v wget >/dev/null 2>&1 && [ $USE_SPACK != "ON" ]; then
+  color_echo ${BAD} "Please make sure wget is installed."
+  exit 1
+fi
+
+#############################################################
+# Spack installation functions
 install_compilers() {
   if [ "$USE_DEFAULT_COMPILER" == "ON" ]; then
     color_echo ${GOOD} "Using spack's default compiler"
@@ -113,12 +161,26 @@ install_compilers() {
 spack_install_dealii() {
   COMPILER=${COMPILER_TYPE}
 
-  # TODO: Let the user set what PRISMS-PF dependencies they would like  
   # Package list for the dealii dependencies
-  packages=("caliper@$CALIPER_VERSION" "dealii@$DEAL_II_VERSION~adol-c~arborx~arpack~assimp~cuda~ginkgo~gmsh~metix~muparser~nanoflann~netcdf~oce~opencascade~petsc~scalapack~simplex~slepc~symengine~trilinos~cgal")
+  packages=("dealii@$DEAL_II_VERSION~adol-c~arborx~arpack~assimp~cuda~ginkgo~gmsh~hdf5~metis~muparser~nanoflann~netcdf~oce~opencascade~petsc~scalapack~simplex~slepc~symengine~trilinos~cgal")
   if [ "$DEAL_II_WITH_CUDA" == "ON" ]; then
     color_echo ${BAD} "PRISMS-PF candi does not support spack installation with cuda"
     exit 1
+  fi
+  if [[ " ${PACKAGES[@]} " =~ " gsl " ]]; then
+    packages=("${packages[@]}+gsl")
+  fi
+  if [[ " ${PACKAGES[@]} " =~ " sundials " ]]; then
+    packages=("${packages[@]}+sundials")
+  fi
+  if [ $USE_64BIT_INDICES == "ON" ]; then
+    packages=("${packages[@]}+int64")
+  fi
+  if [ $NATIVE_OPTIMIZATIONS == "ON" ]; then
+    packages=("${packages[@]}+optflags")
+  fi
+  if [[ " ${PACKAGES[@]} " =~ " caliper " ]]; then
+    packages=("${packages[@]}" "caliper")
   fi
 
   # Install the required and optional dependencies for PRISMS-PF
@@ -137,15 +199,15 @@ spack_install_dealii() {
     fi
 
     # Print the spack concretization
-    spack spec "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}" > concretization.txt
+    spack spec "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}" >concretization.txt
 
     spack install -j$JOBS "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}"
     quit_if_fail "Failed to install required packages"
     spack load ${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}
   else
     # Print the spack concretization
-    spack spec "${packages[@]}" > concretization.txt
-    
+    spack spec "${packages[@]}" >concretization.txt
+
     spack install -j$JOBS ${packages[@]}
     quit_if_fail "Failed to install required packages"
     spack load ${packages[@]}
@@ -154,34 +216,151 @@ spack_install_dealii() {
   spack module lmod refresh -y
   spack unload --all
   color_echo ${GOOD} "Required packages installed"
-  spack gc -y
-}
-
-install_dealii() {
-  mkdir tmp
-
 }
 
 #############################################################
-# Check for various dependencies
-if ! [ -x "$(command -v git)" ]; then
-  color_echo ${BAD} "Make sure git is installed and in path."
-  exit 1
-fi
-if ! [ command -v spack >/dev/null 2>&1 ] && [ USE_SPACK == "ON" ]; then
-  color_echo ${BAD} "Make sure spack is installed and in path."
-  exit 1
-fi
-if ! [ command -v module >/dev/null 2>&1 ] && [ USE_SPACK == "ON" ]; then
-  color_echo ${BAD} "Make sure spack's module system has been setup and in path."
-  exit 1
-fi
-if ! [ command -v wget >/dev/null 2>&1 ]; then
-  color_echo ${BAD} "Please make sure wget is installed."
-  exit 1
-fi
+# Source installation functions
+check_compilers() {
+  # C
+  if [ ! -n "${CC}" ]; then
+    if builtin command -v mpicc >/dev/null; then
+      color_echo ${WARN} "CC variable not set, but found mpicc."
+      export CC=mpicc
+    fi
+  fi
+  if [ -n "${CC}" ]; then
+    color_echo ${INFO} "CC = $(which ${CC})"
+  else
+    color_echo ${BAD} "CC variable not set. Please set it with "export CC = <(MPI) C compiler >""
+    exit 1
+  fi
 
-if [ USE_SPACK == "ON" ]; then
+  # C++
+  if [ ! -n "${CXX}" ]; then
+    if builtin command -v mpicxx >/dev/null; then
+      color_echo ${WARN} "CXX variable not set, but found mpicxx."
+      export CXX=mpicxx
+    fi
+  fi
+  if [ -n "${CXX}" ]; then
+    color_echo ${INFO} "CXX = $(which ${CXX})"
+  else
+    color_echo ${BAD} "CXX variable not set. Please set it with "export CXX = <(MPI) CXX compiler >""
+    exit 1
+  fi
+
+  # F90
+  if [ ! -n "${FC}" ]; then
+    if builtin command -v mpif90 >/dev/null; then
+      color_echo ${WARN} "FC variable not set, but found mpif90."
+      export FC=mpif90
+    fi
+  fi
+  if [ -n "${FC}" ]; then
+    color_echo ${INFO} "FC = $(which ${FC})"
+  else
+    color_echo ${BAD} "FC variable not set. Please set it with "export FC = <(MPI) F90 compiler >""
+    exit 1
+  fi
+
+  # F77
+  if [ ! -n "${FF}" ]; then
+    if builtin command -v mpif77 >/dev/null; then
+      color_echo ${WARN} "CXX variable not set, but found mpicxx."
+      export FF=mpicxx
+    fi
+  fi
+  if [ -n "${FF}" ]; then
+    color_echo ${INFO} "FF = $(which ${FF})"
+  else
+    color_echo ${BAD} "FF variable not set. Please set it with "export FF = <(MPI) F77 compiler >""
+    exit 1
+  fi
+
+  echo
+}
+
+sort_packages() {
+  # Sort the packages so that cuda, kokkos, and openmpi are the first three packages installed
+  SORTED_PACKAGES=()
+
+  # Add cuda and openmpi to the sorted list if they are in the original list
+  for PACKAGE in "cuda" "kokkos" "openmpi"; do
+    if [[ " ${PACKAGES[@]} " =~ " ${PACKAGE} " ]]; then
+      SORTED_PACKAGES+=("${PACKAGE}")
+    fi
+  done
+
+  # Add the remaining packages to the sorted list
+  for PACKAGE in ${PACKAGES[@]}; do
+    if [[ ! " ${SORTED_PACKAGES[@]} " =~ " ${PACKAGE} " ]]; then
+      SORTED_PACKAGES+=("${PACKAGE}")
+    fi
+  done
+
+  # Update the PACKAGES variable with the sorted list
+  PACKAGES=("${SORTED_PACKAGES[@]}")
+}
+
+install_dealii() {
+  check_compilers
+
+  # Create the directories
+  mkdir -p ${INSTALL_PATH}
+  mkdir -p ${PREFIX_PATH}/tmp
+  mkdir -p ${BUILD_PATH}
+
+  # Variables that contain the original directories
+  ORIGINAL_INSTALL_PATH=${INSTALL_PATH}
+  ORIGINAL_BUILD_PATH=${BUILD_PATH}
+  ORIGINAL_DIR=$(pwd)
+
+  # If cuda is enabled, we need to install cuda too
+  if [ "$DEAL_II_WITH_CUDA" == "ON" ]; then
+    PACKAGES="${PACKAGES} cuda"
+  fi
+  sort_packages
+
+  for PACKAGE in ${PACKAGES[@]}; do
+    # Check if the package file exists
+    if [ ! -e packages/${PACKAGE}.package ]; then
+      color_echo ${BAD} "Package file ${PACKAGE}.package not found."
+      exit 1
+    fi
+
+    # Reset variables that are used in the package file
+    unset VERSION
+    unset NAME
+    unset PACKING
+    unset SOURCE
+    unset EXTRACT_TO
+    unset BUILD_DIR
+    unset INSTALL_PATH
+    INSTALL_PATH=${ORIGINAL_INSTALL_PATH}
+
+    # Reset the install function
+    install() {
+      color_echo ${BAD} "Install function not defined for ${PACKAGE}"
+      exit 1
+    }
+
+    # Source the package file
+    source packages/${PACKAGE}.package
+
+    # Install
+    install
+    quit_if_fail "Failed to install ${PACKAGE}"
+    color_echo ${GOOD} "Installed ${PACKAGE}"
+
+    # Go back to the original directory
+    cd ${ORIGINAL_DIR}
+  done
+}
+
+#############################################################
+# Start the build process
+
+if [ $USE_SPACK == "ON" ]; then
   # TODO: If the user desires it we can install spack
 
   # Install compilers with spack
@@ -189,6 +368,9 @@ if [ USE_SPACK == "ON" ]; then
 
   # Install deal.II and other dependencies with the provided compilers
   spack_install_dealii
+else
+  # Install deal.II and other dependencies
+  install_dealii
 fi
 
 # Stop the timer

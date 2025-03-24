@@ -1,0 +1,5 @@
+VERSION=0.3.29
+
+install() {
+  color_echo ${INFO} "Installing OpenBLAS version $VERSION"
+}
