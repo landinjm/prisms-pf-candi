@@ -110,15 +110,14 @@ install_compilers() {
   fi
 }
 
-install_dealii() {
+spack_install_dealii() {
   COMPILER=${COMPILER_TYPE}
 
-  # TODO: Let the user set what dealii packages to install in some config file
-  # TODO: Temp disable cgal because it is causing issues
+  # TODO: Let the user set what PRISMS-PF dependencies they would like  
   # Package list for the dealii dependencies
-  packages=("caliper@$CALIPER_VERSION" "dealii@$DEAL_II_VERSION~cgal")
+  packages=("caliper@$CALIPER_VERSION" "dealii@$DEAL_II_VERSION~adol-c~arborx~arpack~assimp~cuda~ginkgo~gmsh~metix~muparser~nanoflann~netcdf~oce~opencascade~petsc~scalapack~simplex~slepc~symengine~trilinos~cgal")
   if [ "$DEAL_II_WITH_CUDA" == "ON" ]; then
-    color_echo ${BAD} "CUDA not implemented"
+    color_echo ${BAD} "PRISMS-PF candi does not support spack installation with cuda"
     exit 1
   fi
 
@@ -137,10 +136,16 @@ install_dealii() {
       COMPILER_TYPE="clang"
     fi
 
-    spack install -j$JOBS ${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}
+    # Print the spack concretization
+    spack spec "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}" > concretization.txt
+
+    spack install -j$JOBS "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}"
     quit_if_fail "Failed to install required packages"
     spack load ${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}
   else
+    # Print the spack concretization
+    spack spec "${packages[@]}" > concretization.txt
+    
     spack install -j$JOBS ${packages[@]}
     quit_if_fail "Failed to install required packages"
     spack load ${packages[@]}
@@ -151,28 +156,40 @@ install_dealii() {
   color_echo ${GOOD} "Required packages installed"
   spack gc -y
 }
+
+install_dealii() {
+  mkdir tmp
+
+}
+
 #############################################################
 # Check for various dependencies
 if ! [ -x "$(command -v git)" ]; then
   color_echo ${BAD} "Make sure git is installed and in path."
   exit 1
 fi
-if ! command -v spack >/dev/null 2>&1; then
+if ! [ command -v spack >/dev/null 2>&1 ] && [ USE_SPACK == "ON" ]; then
   color_echo ${BAD} "Make sure spack is installed and in path."
   exit 1
 fi
-if ! command -v module >/dev/null 2>&1; then
+if ! [ command -v module >/dev/null 2>&1 ] && [ USE_SPACK == "ON" ]; then
   color_echo ${BAD} "Make sure spack's module system has been setup and in path."
   exit 1
 fi
+if ! [ command -v wget >/dev/null 2>&1 ]; then
+  color_echo ${BAD} "Please make sure wget is installed."
+  exit 1
+fi
 
-# TODO: If the user desires it we can install spack
+if [ USE_SPACK == "ON" ]; then
+  # TODO: If the user desires it we can install spack
 
-# Install compilers with spack
-install_compilers
+  # Install compilers with spack
+  install_compilers
 
-# Install deal.II and other dependencies with the provided compilers
-install_dealii
+  # Install deal.II and other dependencies with the provided compilers
+  spack_install_dealii
+fi
 
 # Stop the timer
 TOC_GLOBAL="$(($(${DATE_CMD} +%s) - TIC_GLOBAL))"
