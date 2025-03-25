@@ -5,15 +5,6 @@
 PACKAGES="openblas openmpi p4est kokkos zlib"
 
 #############################################################
-# Grab the cfg file
-if [ -f "candi.cfg" ]; then
-  source candi.cfg
-else
-  color_echo ${BAD} "No configuration file found. Please create a candi.cfg file."
-  exit 1
-fi
-
-#############################################################
 # Grab the date and start a global timer
 if builtin command -v gdate >/dev/null; then
   DATE_CMD=$(which gdata)
@@ -48,6 +39,55 @@ quit_if_fail() {
     exit ${STATUS}
   fi
 }
+
+#############################################################
+# Grab the cfg file
+if [ -f "candi.cfg" ]; then
+  source candi.cfg
+else
+  color_echo ${BAD} "No configuration file found. Please create a candi.cfg file."
+  exit 1
+fi
+
+# A few checks on the cfg file
+check_config_value() {
+  local var_name=$1
+  local var_value=$2
+  if [[ "$var_value" != "ON" && "$var_value" != "OFF" ]]; then
+    color_echo ${BAD} "Invalid value for $var_name=$var_value. Expected ON or OFF."
+    exit 1
+  fi
+}
+
+version_greater_equal() {
+  local version=$1
+  local base_version=$2
+
+  # Split the versions into arrays
+  IFS='.' read -r -a version_parts <<<"$version"
+  IFS='.' read -r -a base_version_parts <<<"$base_version"
+
+  # Compare each part of the version
+  for ((i = 0; i < ${#base_version_parts[@]}; i++)); do
+    if [[ ${version_parts[i]:-0} -gt ${base_version_parts[i]} ]]; then
+      return 0
+    elif [[ ${version_parts[i]:-0} -lt ${base_version_parts[i]} ]]; then
+      return 1
+    fi
+  done
+
+  return 0
+}
+
+check_config_value "USE_SPACK" "$USE_SPACK"
+check_config_value "NATIVE_OPTIMIZATIONS" "$NATIVE_OPTIMIZATIONS"
+check_config_value "USE_64BIT_INDICES" "$USE_64BIT_INDICES"
+check_config_value "DEAL_II_WITH_CUDA" "$DEAL_II_WITH_CUDA"
+
+if ! version_greater_equal "$DEAL_II_VERSION" "9.6"; then
+  color_echo ${BAD} "Invalid value for DEAL_II_VERSION=$DEAL_II_VERSION. Expected version greater than 9.6"
+  exit 1
+fi
 
 #############################################################
 # Parse command line inputs
@@ -111,13 +151,10 @@ BUILD_PATH=${PREFIX_PATH}/tmp/build
 INSTALL_PATH=${PREFIX_PATH}
 
 # Check that inputs are valids
-if [[ "$USE_DEFAULT_COMPILER" != "ON" && "$USE_DEFAULT_COMPILER" != "OFF" ]]; then
-  color_echo ${BAD} "Invalid value for --default: $USE_DEFAULT_COMPILER. Expected ON or OFF."
-  exit 2
-fi
+check_config_value "--default" "$USE_DEFAULT_COMPILER"
 if ! [[ "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
   color_echo ${BAD} "Invalid value for --jobs: $JOBS. Expected a positive number."
-  exit 2
+  exit 1
 fi
 
 #############################################################
