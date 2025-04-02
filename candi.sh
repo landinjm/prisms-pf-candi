@@ -252,10 +252,10 @@ spack_install_dealii() {
     fi
 
     # Print the spack concretization
-    # spack spec "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}" >concretization.txt
+    spack spec "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}" >concretization.txt
 
-    # spack install -j$JOBS "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}"
-    # quit_if_fail "Failed to install required packages"
+    spack install -j$JOBS "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}"
+    quit_if_fail "Failed to install required packages"
     spack load ${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}
   else
     # Print the spack concretization
