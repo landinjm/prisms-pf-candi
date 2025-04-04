@@ -206,6 +206,38 @@ install_compilers() {
   fi
 }
 
+fix_clang_compilers() {
+  # In spack, the clang compiler does not come with f77 or fc compilers.
+  # Instead we need to find and use the gfortran compiler
+
+  # Make sure gfortran is installed
+  if ! command -v gfortran >/dev/null 2>&1; then
+    color_echo ${BAD} "gfortran is not installed. Please install it before proceeding."
+    exit 1
+  fi
+
+  # Grab gfortran path
+  GFORTRAN_PATH=$(which gfortran)
+
+  # Check that spack is installed in the usual location
+  SPACK_COMPILER_YAML="$HOME/.spack/linux/compilers.yaml"
+  if [ ! -f "$SPACK_COMPILER_YAML" ]; then
+    echo "Error: Spack compilers.yaml not found at $SPACK_COMPILER_YAML"
+    exit 1
+  fi
+
+  # Backup the original compilers.yaml
+  cp "$SPACK_COMPILER_YAML" "${SPACK_COMPILER_YAML}.bak"
+  echo "Backup created at ${SPACK_COMPILER_YAML}.bak"
+
+  # Update f77 and fc fields in compilers.yaml
+  awk -v gfortran_path="$GFORTRAN_PATH" '
+  /f77: null/ { sub("null", gfortran_path) }
+  /fc: null/ { sub("null", gfortran_path) }
+  { print }
+' "$SPACK_COMPILER_YAML" >"${SPACK_COMPILER_YAML}.tmp" && mv "${SPACK_COMPILER_YAML}.tmp" "$SPACK_COMPILER_YAML"
+}
+
 spack_install_dealii() {
   COMPILER=${COMPILER_TYPE}
 
@@ -251,20 +283,24 @@ spack_install_dealii() {
       COMPILER_TYPE="clang"
     fi
 
-    # Print the spack concretization
-    spack spec "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}" >concretization.txt
-
-    spack install -j$JOBS "${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}"
-    quit_if_fail "Failed to install required packages"
-    spack load ${packages[@]/%/%${COMPILER_TYPE}@${COMPILER_VERSION}}
-  else
-    # Print the spack concretization
-    spack spec "${packages[@]}" >concretization.txt
-
-    spack install -j$JOBS ${packages[@]}
-    quit_if_fail "Failed to install required packages"
-    spack load ${packages[@]}
+    # The next part is a little iffy. First split the `packages` by spaces, apply the compiler,
+    # then recombine
+    IFS=' ' read -r -a packages_array <<<"$packages"
+    for i in "${!packages_array[@]}"; do
+      packages_array[$i]="${packages_array[$i]}%${COMPILER_TYPE}@${COMPILER_VERSION}"
+    done
+    packages=$(
+      IFS=' '
+      echo "${packages_array[*]}"
+    )
   fi
+
+  # Print the spack concretization
+  spack spec "${packages[@]}" >concretization.txt
+
+  spack install -j$JOBS "${packages[@]}"
+  quit_if_fail "Failed to install required packages"
+  spack load ${packages[@]}
 
   if [ $USE_PARTIAL_SPACK == "ON" ]; then
     if [ ! -d "$SRC_PATH/dealii-v$DEAL_II_VERSION" ]; then
@@ -316,8 +352,12 @@ spack_install_dealii() {
     cmake_cmd="cmake \
     -D CMAKE_C_COMPILER=mpicc \
     -D CMAKE_CXX_COMPILER=mpicxx \
-    -D CMAKE_INSTALL_PREFIX=$DEAL_II_INSTALL_DIR \
+    -D DEAL_II_ALLOW_AUTODETECTION=OFF \
+    -D DEAL_II_FORCE_BUNDLED_BOOST=ON \
     -D DEAL_II_FORCE_BUNDLED_TBB=ON \
+    -D DEAL_II_WITH_COMPLEX_VALUES=OFF \
+    -D DEAL_II_WITH_TBB=ON \
+    -D CMAKE_INSTALL_PREFIX=$DEAL_II_INSTALL_DIR \
     -D DEAL_II_WITH_LAPACK=ON \
     -D LAPACK_DIR=$OPENBLAS_DIR \
     -D DEAL_II_WITH_MPI=ON \
@@ -329,16 +369,16 @@ spack_install_dealii() {
     -D DEAL_II_WITH_ZLIB=ON \
     -D ZLIB_DIR=$ZLIB_DIR"
     if [[ " ${PACKAGES[@]} " =~ " gsl " ]]; then
-      cmake_cmd+="-D DEAL_II_WITH_GSL=ON -D GSL_DIR=$GSL_DIR"
+      cmake_cmd+=" -D DEAL_II_WITH_GSL=ON -D GSL_DIR=$GSL_DIR "
     fi
     if [[ " ${PACKAGES[@]} " =~ " sundials " ]]; then
-      cmake_cmd+="-D DEAL_II_WITH_SUNDIALS=ON -D SUNDIALS_DIR=$SUNDIALS_DIR"
+      cmake_cmd+=" -D DEAL_II_WITH_SUNDIALS=ON -D SUNDIALS_DIR=$SUNDIALS_DIR "
     fi
     if [ $USE_64BIT_INDICES == "ON" ]; then
-      cmake_cmd+="-D DEAL_II_WITH_64BIT_INDICES=ON"
+      cmake_cmd+=" -D DEAL_II_WITH_64BIT_INDICES=ON "
     fi
     if [ $NATIVE_OPTIMIZATIONS == "ON" ]; then
-      cmake_cmd+="-D DEAL_II_CXX_FLAGS=\"-march=native\""
+      cmake_cmd+=" -D DEAL_II_CXX_FLAGS=\"-march=native\" "
     fi
 
     cmake_cmd+=" $SRC_PATH/dealii-v$DEAL_II_VERSION"
@@ -591,6 +631,11 @@ if [ $USING_SPACK == "ON" ]; then
 
   # Install compilers with spack
   install_compilers
+
+  # Fix the compilers if needed
+  if [ "$COMPILER_TYPE" == "llvm" ]; then
+    fix_clang_compilers
+  fi
 
   # Install deal.II and other dependencies with the provided compilers
   spack_install_dealii
