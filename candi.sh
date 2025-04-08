@@ -81,6 +81,7 @@ version_greater_equal() {
 
 check_config_value "USE_FULL_SPACK" "$USE_FULL_SPACK"
 check_config_value "USE_PARTIAL_SPACK" "$USE_PARTIAL_SPACK"
+check_config_value "DEAL_II_EXAMPLES" "$DEAL_II_EXAMPLES"
 check_config_value "NATIVE_OPTIMIZATIONS" "$NATIVE_OPTIMIZATIONS"
 check_config_value "USE_64BIT_INDICES" "$USE_64BIT_INDICES"
 check_config_value "DEAL_II_WITH_CUDA" "$DEAL_II_WITH_CUDA"
@@ -255,6 +256,9 @@ spack_install_dealii() {
     if [[ " ${PACKAGES[@]} " =~ " sundials " ]]; then
       packages=("${packages[@]}+sundials")
     fi
+    if [ $DEAL_II_EXAMPLES == "OFF" ]; then
+      packages=("${packages[@]}~examples~examples_compile")
+    fi
     if [ $USE_64BIT_INDICES == "ON" ]; then
       packages=("${packages[@]}+int64")
     fi
@@ -373,6 +377,9 @@ spack_install_dealii() {
     fi
     if [[ " ${PACKAGES[@]} " =~ " sundials " ]]; then
       cmake_cmd+=" -D DEAL_II_WITH_SUNDIALS=ON -D SUNDIALS_DIR=$SUNDIALS_DIR "
+    fi
+    if [ $DEAL_II_EXAMPLES == "OFF" ]; then
+      cmake_cmd+=" -D DEAL_II_COMPONENT_EXAMPLES=OFF "
     fi
     if [ $USE_64BIT_INDICES == "ON" ]; then
       cmake_cmd+=" -D DEAL_II_WITH_64BIT_INDICES=ON "
