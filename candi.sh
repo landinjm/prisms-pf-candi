@@ -356,6 +356,8 @@ spack_install_dealii() {
     cmake_cmd="cmake \
     -D CMAKE_C_COMPILER=mpicc \
     -D CMAKE_CXX_COMPILER=mpicxx \
+    -D DEAL_II_CXX_FLAGS='-std=c++20' \
+    -D DEAL_II_EARLY_DEPRECATIONS=ON \
     -D DEAL_II_ALLOW_AUTODETECTION=OFF \
     -D DEAL_II_FORCE_BUNDLED_BOOST=ON \
     -D DEAL_II_FORCE_BUNDLED_TBB=ON \
