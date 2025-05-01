@@ -1,1 +1,4 @@
 concretization.txt
+tmp/*
+modules/*
+dealii*/*

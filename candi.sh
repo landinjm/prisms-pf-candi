@@ -79,6 +79,8 @@ version_greater_equal() {
   return 0
 }
 
+check_config_value "PRISMS_PF" "$PRISMS_PF"
+check_config_value "PRISMS_PLASTICITY" "$PRISMS_PLASTICITY"
 check_config_value "USE_FULL_SPACK" "$USE_FULL_SPACK"
 check_config_value "USE_PARTIAL_SPACK" "$USE_PARTIAL_SPACK"
 check_config_value "DEAL_II_EXAMPLES" "$DEAL_II_EXAMPLES"
@@ -306,6 +308,15 @@ spack_install_dealii() {
   quit_if_fail "Failed to install required packages"
   spack load ${packages[@]}
 
+  if [ "$USE_DEFAULT_COMPILER" != "ON" ]; then
+    if [[ " ${PACKAGES[@]} " =~ " caliper " ]]; then
+      CALIPER_DIR=$(spack location -i $(spack find -H caliper%${COMPILER_TYPE}@${COMPILER_VERSION} | head -n 1))
+    fi
+  else
+    if [[ " ${PACKAGES[@]} " =~ " caliper " ]]; then
+      CALIPER_DIR=$(spack location -i $(spack find -H caliper | head -n 1))
+    fi
+  fi
   if [ $USE_PARTIAL_SPACK == "ON" ]; then
     if [ ! -d "$SRC_PATH/dealii-v$DEAL_II_VERSION" ]; then
       git clone https://github.com/dealii/dealii.git $SRC_PATH/dealii-v$DEAL_II_VERSION
@@ -353,44 +364,64 @@ spack_install_dealii() {
       mkdir $DEAL_II_BUILD_DIR
     fi
     cd $DEAL_II_BUILD_DIR
-    cmake_cmd="cmake \
-    -D CMAKE_C_COMPILER=mpicc \
-    -D CMAKE_CXX_COMPILER=mpicxx \
-    -D DEAL_II_CXX_FLAGS='-std=c++20' \
-    -D DEAL_II_EARLY_DEPRECATIONS=ON \
-    -D DEAL_II_ALLOW_AUTODETECTION=OFF \
-    -D DEAL_II_FORCE_BUNDLED_BOOST=ON \
-    -D DEAL_II_FORCE_BUNDLED_TBB=ON \
-    -D DEAL_II_WITH_COMPLEX_VALUES=OFF \
-    -D DEAL_II_WITH_TBB=ON \
-    -D CMAKE_INSTALL_PREFIX=$DEAL_II_INSTALL_DIR \
-    -D DEAL_II_WITH_LAPACK=ON \
-    -D LAPACK_DIR=$OPENBLAS_DIR \
-    -D DEAL_II_WITH_MPI=ON \
-    -D MPI_DIR=$MPI_DIR \
-    -D DEAL_II_WITH_P4EST=ON \
-    -D P4EST_DIR=$P4EST_DIR \
-    -D DEAL_II_WITH_KOKKOS=ON \
-    -D KOKKOS_DIR=$KOKKOS_DIR \
-    -D DEAL_II_WITH_ZLIB=ON \
-    -D ZLIB_DIR=$ZLIB_DIR"
+
+    # Function to add CMake flags
+    add_cmake_flag() {
+      local flag_name=$1
+      local flag_value=$2
+      CMAKE_FLAGS+=("-D $flag_name=$flag_value")
+    }
+
+    # Initialize CMake flags array
+    CMAKE_FLAGS=()
+
+    # Basic compiler and build settings
+    add_cmake_flag "CMAKE_C_COMPILER" "mpicc"
+    add_cmake_flag "CMAKE_CXX_COMPILER" "mpicxx"
+    add_cmake_flag "DEAL_II_CXX_FLAGS" "'-std=c++20'"
+    add_cmake_flag "DEAL_II_EARLY_DEPRECATIONS" "ON"
+    add_cmake_flag "DEAL_II_ALLOW_AUTODETECTION" "OFF"
+    add_cmake_flag "DEAL_II_FORCE_BUNDLED_BOOST" "ON"
+    add_cmake_flag "DEAL_II_FORCE_BUNDLED_TBB" "ON"
+    add_cmake_flag "DEAL_II_WITH_COMPLEX_VALUES" "OFF"
+    add_cmake_flag "DEAL_II_WITH_TBB" "ON"
+    add_cmake_flag "CMAKE_INSTALL_PREFIX" "$DEAL_II_INSTALL_DIR"
+
+    # Required dependencies
+    add_cmake_flag "DEAL_II_WITH_LAPACK" "ON"
+    add_cmake_flag "LAPACK_DIR" "$OPENBLAS_DIR"
+    add_cmake_flag "DEAL_II_WITH_MPI" "ON"
+    add_cmake_flag "MPI_DIR" "$MPI_DIR"
+    add_cmake_flag "DEAL_II_WITH_P4EST" "ON"
+    add_cmake_flag "P4EST_DIR" "$P4EST_DIR"
+    add_cmake_flag "DEAL_II_WITH_KOKKOS" "ON"
+    add_cmake_flag "KOKKOS_DIR" "$KOKKOS_DIR"
+    add_cmake_flag "DEAL_II_WITH_ZLIB" "ON"
+    add_cmake_flag "ZLIB_DIR" "$ZLIB_DIR"
+
+    # Optional dependencies
     if [[ " ${PACKAGES[@]} " =~ " gsl " ]]; then
-      cmake_cmd+=" -D DEAL_II_WITH_GSL=ON -D GSL_DIR=$GSL_DIR "
+      add_cmake_flag "DEAL_II_WITH_GSL" "ON"
+      add_cmake_flag "GSL_DIR" "$GSL_DIR"
     fi
     if [[ " ${PACKAGES[@]} " =~ " sundials " ]]; then
-      cmake_cmd+=" -D DEAL_II_WITH_SUNDIALS=ON -D SUNDIALS_DIR=$SUNDIALS_DIR "
-    fi
-    if [ $DEAL_II_EXAMPLES == "OFF" ]; then
-      cmake_cmd+=" -D DEAL_II_COMPONENT_EXAMPLES=OFF "
-    fi
-    if [ $USE_64BIT_INDICES == "ON" ]; then
-      cmake_cmd+=" -D DEAL_II_WITH_64BIT_INDICES=ON "
-    fi
-    if [ $NATIVE_OPTIMIZATIONS == "ON" ]; then
-      cmake_cmd+=" -D DEAL_II_CXX_FLAGS=\"-march=native\" "
+      add_cmake_flag "DEAL_II_WITH_SUNDIALS" "ON"
+      add_cmake_flag "SUNDIALS_DIR" "$SUNDIALS_DIR"
     fi
 
-    cmake_cmd+=" $SRC_PATH/dealii-v$DEAL_II_VERSION"
+    # Configuration options
+    if [ $DEAL_II_EXAMPLES == "OFF" ]; then
+      add_cmake_flag "DEAL_II_COMPONENT_EXAMPLES" "OFF"
+    fi
+    if [ $USE_64BIT_INDICES == "ON" ]; then
+      add_cmake_flag "DEAL_II_WITH_64BIT_INDICES" "ON"
+    fi
+    if [ $NATIVE_OPTIMIZATIONS == "ON" ]; then
+      add_cmake_flag "DEAL_II_CXX_FLAGS" "\"-march=native\""
+    fi
+
+    # Build and execute CMake command
+    cmake_cmd="cmake ${CMAKE_FLAGS[@]} $SRC_PATH/dealii-v$DEAL_II_VERSION"
     eval $cmake_cmd
     quit_if_fail "Invalid cmake configuration"
     make -j$JOBS
@@ -414,6 +445,9 @@ spack_install_dealii() {
       fi
       if [[ " ${PACKAGES[@]} " =~ " sundials " ]]; then
         SUNDIALS_MODULE=$(spack find --format "{name}/{version}-${COMPILER_TYPE}-${COMPILER_VERSION}" sundials | head -n 1)
+      fi
+      if [[ " ${PACKAGES[@]} " =~ " caliper " ]]; then
+        CALIPER_MODULE=$(spack find --format "{name}/{version}-${COMPILER_TYPE}-${COMPILER_VERSION}" caliper | head -n 1)
       fi
 
       cat <<EOF >$DEAL_II_MODULE_NAME
@@ -455,6 +489,14 @@ EOF
   if not (isloaded("$SUNDIALS_MODULE")) then
       load("$SUNDIALS_MODULE")
   end
+EOF
+      fi
+      if [[ " ${PACKAGES[@]} " =~ " caliper " ]]; then
+        cat <<EOF >>$DEAL_II_MODULE_NAME
+  if not (isloaded("$CALIPER_MODULE")) then
+      load("$CALIPER_MODULE")
+  end
+  prepend_path("LD_LIBRARY_PATH", "$CALIPER_DIR/lib")
 EOF
       fi
 
