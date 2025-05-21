@@ -263,6 +263,8 @@ spack_install_dealii() {
 
 	# Package list for the dealii dependencies
 	if [ $USE_FULL_SPACK == "ON" ]; then
+		color_echo ${BAD} "Full spack installs are not supported currently"
+		exit 1
 		packages=("dealii@$DEAL_II_VERSION~adol-c~arborx~arpack~assimp~cuda~ginkgo~gmsh~hdf5~metis~muparser~nanoflann~netcdf~oce~opencascade~petsc~scalapack~simplex~slepc~symengine~trilinos~cgal")
 		if [[ " ${PACKAGES[@]} " =~ " gsl " ]]; then
 			packages=("${packages[@]}+gsl")
